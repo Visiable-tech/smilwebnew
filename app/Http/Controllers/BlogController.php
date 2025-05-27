@@ -1,0 +1,141 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Post;
+use App\Models\PostMetaElement;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
+use Carbon\Carbon;
+
+
+class BlogController extends Controller
+{
+
+    public function index(){
+        return view('admin/Blog');
+    }
+
+    public function store(Request $request)
+    {
+        $request->validate([
+            'post_type'    => 'required|string',
+            'title'        => 'required|string',
+            'slug'         => 'required|string',
+        ]);
+    
+        $path = public_path('uploads/posts');
+
+        if (!File::exists($path)) {
+            File::makeDirectory($path, 0777, true, true); // 4th param = recursive
+        }
+
+        $imagePath = null;
+        if ($request->hasFile('image')) {
+            $image = $request->file('image');
+            $imageName = Str::random(20) . '.' . $image->getClientOriginalExtension();
+            $image->move($path, $imageName);
+            $imagePath = 'uploads/posts/' . $imageName;
+        }
+        $formattedDate = Carbon::parse($request->created_date)->format('Y-m-d');
+        // Save post
+        $post = Post::create([
+            'user_id'       => $request->input('user_id', 1),
+            'post_type'     => $request->post_type,
+            'slug'          => $request->slug,
+            'title'         => $request->title,
+            'content'       => $request->input('content'),
+            'expert'        => $request->input('expert'),
+            'image'         => $imagePath,
+            'image_alt'     => $request->input('image_alt'),
+            'is_front_page' => $request->input('is_front_page', 0),
+            'template'      => $request->input('template', 2),
+            'status'        => $request->input('status', 1),
+            'blog_date'     => $formattedDate,
+        ]);
+
+        $post->meta()->create($request->only([
+            'seo_title', 'description', 'keywords', 'robots', 'revisit_after',
+            'og_locale', 'og_type', 'og_image', 'og_title', 'og_url', 'og_description',
+            'og_site_name', 'author', 'canonical', 'geo_region', 'geo_placename',
+            'geo_position', 'ICBM'
+        ]));
+    
+        return redirect()->route('admin.blogs.edit', $post->id)->with('success', 'Blog created and images converted to WebP');
+    }
+
+    public function show($id)
+    {
+        $post = Post::with('meta')->where('post_type', 2)->findOrFail($id);
+        return response()->json($post);
+    }
+
+    public function edit($id)
+    {
+        $post = Post::with('meta')->where('post_type', 2)->findOrFail($id);
+
+        return view('admin/blog_edit', compact('post'));
+    }
+
+    public function update(Request $request, $id)
+    {
+        $request->validate([
+            'title' => 'required|string|max:255',
+            'slug' => 'required|string|max:255',
+        ]);
+
+        $post = Post::findOrFail($id);
+
+        $path = public_path('uploads/posts');
+
+        if (!File::exists($path)) {
+            File::makeDirectory($path, 0777, true, true); // 4th param = recursive
+        }
+
+        // Handle image upload if provided
+        if ($request->hasFile('image')) {
+            $imagePath = null;
+            if ($request->hasFile('image')) {
+                $image = $request->file('image');
+                $imageName = Str::random(20) . '.' . $image->getClientOriginalExtension();
+                $image->move($path, $imageName);
+                $imagePath = 'uploads/posts/' . $imageName;
+            }
+        } else {
+            $imagePath = $post->image; // keep existing image
+        }
+        
+        // Update post
+        $post->update([
+            'title'       => $request->title,
+            'slug'        => $request->slug,
+            'content'     => $request->content,
+            'expert'      => $request->expert,
+            'image'       => $imagePath,
+            'image_alt'   => $request->image_alt,
+            'blog_date'   => $request->input('created_date'),
+        ]);
+
+        // Update or create post meta
+        $post->meta()->updateOrCreate([], $request->only([
+            'seo_title', 'description', 'keywords', 'robots', 'revisit_after',
+            'og_locale', 'og_type', 'og_image', 'og_title', 'og_url', 'og_description',
+            'og_site_name', 'author', 'canonical', 'geo_region', 'geo_placename',
+            'geo_position', 'ICBM'
+        ]));
+
+        return redirect()->route('admin.blogs.edit', $post->id)->with('success', 'Blog updated successfully.');
+    }
+
+    public function allBlogs()
+    {
+        $blog = Post::with('meta')->where('post_type', 2)->orderBy('id', 'desc')->get();
+
+        return view('admin/bloglisting', compact('blog'));
+    }
+
+
+
+}
